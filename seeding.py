@@ -30,10 +30,10 @@ max_level = config["max_level"]
 seed_yaml_file_path = '/tmp/temp_seed.yaml'
 
 # Connect to the database
-conn_cfg = config["connection"]
-connection_str = f"dbname={conn_cfg['database']} host={conn_cfg['host']} port={conn_cfg['port']} user={conn_cfg['user']} password={conn_cfg['password']}"
+db_url = config["db_url"]
+pg_service = db_url.split("=")[-1]
 
-conn = psycopg2.connect(connection_str)
+conn = psycopg2.connect(db_url)
 cursor = conn.cursor()
 
 # Check last seed time (only when updating)
@@ -117,7 +117,7 @@ if config.get("exploitations"):
              'coverages:\n'
              '  seed_cov:\n'
              '    srs: "EPSG:25831"\n'
-            f'    datasource: "PG: {connection_str}"\n'
+            f'    datasource: "PG: service={pg_service}"\n'
             f'    where: {coverage_where_str}\n'
         )
         
