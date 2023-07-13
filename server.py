@@ -17,7 +17,7 @@ tenant_handler = TenantHandler(flask_app.logger)
 jwt = auth_manager(flask_app)
 
 @flask_app.route('/update')
-@optional_auth
+@jwt_required()
 def seeding():
     tenant = tenant_handler.tenant()
     print("tenant ->", tenant)
