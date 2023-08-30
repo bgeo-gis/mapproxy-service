@@ -1,3 +1,10 @@
+"""
+Copyright © 2023 by BGEO. All rights reserved.
+The program is free software: you can redistribute it and/or modify it under the terms of the GNU
+General Public License as published by the Free Software Foundation, either version 3 of the License,
+or (at your option) any later version.
+"""
+
 from flask import Flask, request, make_response
 from qwc_services_core.auth import optional_auth, auth_manager
 from qwc_services_core.runtime_config import RuntimeConfig
