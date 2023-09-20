@@ -6,6 +6,7 @@ or (at your option) any later version.
 """
 
 from flask import Flask, request, make_response
+from flask_jwt_extended import jwt_required
 from qwc_services_core.auth import optional_auth, auth_manager
 from qwc_services_core.runtime_config import RuntimeConfig
 from qwc_services_core.tenant_handler import TenantHandler
