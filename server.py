@@ -24,7 +24,7 @@ flask_app = Flask(__name__)
 tenant_handler = TenantHandler(flask_app.logger)
 jwt = auth_manager(flask_app)
 
-@flask_app.route('/update')
+@flask_app.route('/update_valve')
 @jwt_required()
 def seeding():
     tenant = tenant_handler.tenant()
@@ -34,32 +34,42 @@ def seeding():
 
     args = request.get_json(force=True) if request.is_json else request.args
     theme = args.get("theme")
+    id = int(args.get("valveId"))
     
     tile_update_config_file = config.get("themes").get(theme).get("tile_update_config_file")
     print(tile_update_config_file)
+    print("VALVE ID: ", id)
 
     if tile_update_config_file:
         print("Executing...")
+        # cmd = [
+        #     "python3",
+        #     "/srv/qwc_service/seeding.py",
+        #     f"/srv/qwc_service/mapproxy/config/{tile_update_config_file}",
+        #     "-m", "update_timestamp"
+        # ]
         cmd = [
             "python3",
             "/srv/qwc_service/seeding.py",
             f"/srv/qwc_service/mapproxy/config/{tile_update_config_file}",
-            "-m", "update"
+            "-m", "update_elements", "-f", json.dumps({"node": [id]})
         ]
-        result = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        print("CMD; ", cmd)
+        # result = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        result = subprocess.run(cmd)
 
         code = 200 if result.returncode == 0 else 500
 
-        stdout = result.stdout.decode()
-        stderr = result.stderr.decode()
+        # stdout = result.stdout.decode()
+        # stderr = result.stderr.decode()
 
         print("Finished executing :)")
 
         response_msg = (
             f"INFO:\n"
-            f"{stdout}\n\n"
+            # f"{stdout}\n\n"
             f"ERRORS:\n"
-            f"{stderr}"
+            # f"{stderr}"
         )
         print(response_msg)
 
