@@ -1,5 +1,5 @@
 """
-Copyright © 2023 by BGEO. All rights reserved.
+Copyright © 2024 by BGEO. All rights reserved.
 The program is free software: you can redistribute it and/or modify it under the terms of the GNU
 General Public License as published by the Free Software Foundation, either version 3 of the License,
 or (at your option) any later version.
@@ -15,7 +15,7 @@ import argparse
 parser = argparse.ArgumentParser(prog='Seeding Program')
 parser.add_argument("config_file")
 parser.add_argument(
-    '-m', '--mode', 
+    '-m', '--mode',
     choices=["full", "update", "exploitation", "basemap", "update_elements", "update_timestamp"],
     required=True,
 )
@@ -65,7 +65,7 @@ if mode == "update" or mode == "update_timestamp":
     if not os.path.exists(last_seed_file_path):
         print(f"Last seed file `{last_seed_file_path}` does not exist, please do a full seed before updating")
         exit(1)
-    
+
     last_seed = datetime.datetime.fromtimestamp(os.path.getmtime(last_seed_file_path))
 
 # Recreate the last seed file to indicate the time of the newest seed
@@ -93,7 +93,7 @@ if config.get("basemap") and mode == "full" or mode == "basemap":
     )
     with open(seed_yaml_file_path, 'w') as seed_yaml_file:
         seed_yaml_file.write(basemap_file_str)
-    
+
     # Activate all exploitations in selector
     cursor.execute((
         f'SELECT {db_schema}.gw_fct_setselectors($${{'
@@ -177,7 +177,7 @@ if config.get("exploitations") and mode in {"exploitation", "update", "full", "u
             with open(geojson_file_path, 'w') as f:
                 json.dump(geo_json, f, ensure_ascii=False)
         else:
-            coverage_where_str = expl_geom_query 
+            coverage_where_str = expl_geom_query
 
         if mode == "exploitation":
              expl_file_str = (
@@ -192,25 +192,25 @@ if config.get("exploitations") and mode in {"exploitation", "update", "full", "u
              'coverages:\n'
              '  seed_cov:\n'
              '    srs: "EPSG:25831"\n'
-            f'    datasource: "PG: service={pg_service}"\n'
+            f'    datasource: {db_url}\n'
             f'    where: {coverage_where_str}\n'
         )
         else:
             expl_file_str = (
-                'seeds:\n'
-                '  seed_prog:\n'
+                 'seeds:\n'
+                 '  seed_prog:\n'
                 f'    caches: [{cache_name}]\n'
-                '    coverages: [seed_cov]\n'
-                '    refresh_before:\n'
-                '      minutes: 0\n'
-                '    levels:\n'
+                 '    coverages: [seed_cov]\n'
+                 '    refresh_before:\n'
+                 '      minutes: 0\n'
+                 '    levels:\n'
                 f'      to: {max_level}\n'
-                'coverages:\n'
-                '  seed_cov:\n'
-                '    srs: "EPSG:25831"\n'
+                 'coverages:\n'
+                 '  seed_cov:\n'
+                 '    srs: "EPSG:25831"\n'
                 f'    datasource: /tmp/geometry.geojson\n'
         )
-       
+
         print(expl_file_str)
         with open(seed_yaml_file_path, 'w') as seed_yaml_file:
             seed_yaml_file.write(expl_file_str)
@@ -225,7 +225,7 @@ if config.get("exploitations") and mode in {"exploitation", "update", "full", "u
              '}$$);'
         ))
         cursor.execute((
-             f'SELECT {db_schema}.gw_fct_setselectors($${{'
+            f'SELECT {db_schema}.gw_fct_setselectors($${{'
              '    "client":{"device": 5, "lang": "es_ES", "cur_user": "mapproxy", "tiled": "True", "infoType": 1, "epsg": 25831}, '
              '    "form":{}, '
              '    "feature":{}, '
