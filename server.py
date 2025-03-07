@@ -20,7 +20,7 @@ import os
 import psycopg2
 
 from make_conf import make_config
-from seeding_v2 import seed
+from make_conf_v2 import make_config_v2
 
 user_config_path = '/srv/qwc_service/mapproxy/config/'
 generated_config_path = os.path.join(user_config_path, 'config-out')
@@ -43,6 +43,20 @@ def generate_config():
         return Response(f"Config {config} generated", 200)
     except Exception as e:
         return Response(f"Error generating config: {e}", 500)
+
+@app.route('/seeding/generate_config_v2')
+# @jwt_required()
+def generate_config_v2():
+    config = request.args.get("config")
+    if config is None:
+        return Response("Config not provided", 400)
+
+    try:
+        make_config_v2(user_config_path, generated_config_path, config)
+        return Response(f"Config {config} generated", 200)
+    except Exception as e:
+        return Response(f"Error generating config: {e}", 500)
+
 
 @app.route('/seeding/seed/all')
 @jwt_required()
