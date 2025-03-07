@@ -1,5 +1,5 @@
 """
-Copyright © 2024 by BGEO. All rights reserved.
+Copyright © 2025 by BGEO. All rights reserved.
 The program is free software: you can redistribute it and/or modify it under the terms of the GNU
 General Public License as published by the Free Software Foundation, either version 3 of the License,
 or (at your option) any later version.
@@ -56,7 +56,7 @@ def make_config(config_path: str, generated_config_path: str, file_name: str):
             },
             "coverage": {
                 "clip": False,
-                "srs": "EPSG:25831",
+                "srs": "EPSG:31982",
                 "datasource": config["db_url"],
                 "where": f"SELECT ST_Buffer(geom, 0) FROM {config['tiling_db_table']} WHERE tilecluster_id = '{tilecluster_id}'",
             },
