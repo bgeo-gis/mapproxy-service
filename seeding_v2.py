@@ -33,8 +33,16 @@ def seed(config_path: str, generated_config_path: str, file_name: str, coverage:
     db_schema = config["data_db_schema"]
     # grid_name = "main"
 
+    print("Replica DB: ", config["db_url"])
+    print("Main DB: ", config["db_url_remote"])
+
+    # Connect to main database for tilecluster data
     conn = psycopg2.connect(config["db_url"])
     cursor = conn.cursor()
+
+    # Connect to remote database for selector operations
+    remote_conn = psycopg2.connect(config["db_url_remote"])
+    remote_cursor = remote_conn.cursor()
 
     cursor.execute(f'SELECT tilecluster_id, expl_id, sector_id, state FROM {config["tiling_db_table"]}')
     tilecluster_data = cursor.fetchall()
@@ -42,6 +50,20 @@ def seed(config_path: str, generated_config_path: str, file_name: str, coverage:
     for tilecluster_id, expl, sector, state in tilecluster_data:
         grid_name = f"{tilecluster_id}_grid"
         print(f"Seeding {tilecluster_id}...")
+
+        # Update selector tables in remote database
+        remote_cursor.execute(
+            f"DELETE FROM {db_schema}.selector_expl WHERE cur_user = current_user;"
+            f"INSERT INTO {db_schema}.selector_expl (expl_id, cur_user) VALUES ({expl}, current_user);"
+
+            f"DELETE FROM {db_schema}.selector_sector WHERE cur_user = current_user;"
+            f"INSERT INTO {db_schema}.selector_sector (sector_id, cur_user) VALUES ({sector}, current_user);"
+
+            f"DELETE FROM {db_schema}.selector_state WHERE cur_user = current_user;"
+            f"INSERT INTO {db_schema}.selector_state (state_id, cur_user) VALUES ({state}, current_user);"
+        )
+        remote_conn.commit()
+
         output = {
             "seeds": {
                 "seed_prog": {
@@ -65,17 +87,6 @@ def seed(config_path: str, generated_config_path: str, file_name: str, coverage:
         with open(seed_yaml_file, "w") as f:
             yaml.dump(output, f)
 
-        cursor.execute(
-            f"DELETE FROM {db_schema}.selector_expl WHERE cur_user = current_user;"
-            f"INSERT INTO {db_schema}.selector_expl (expl_id, cur_user) VALUES ({expl}, current_user);"
-
-            f"DELETE FROM {db_schema}.selector_sector WHERE cur_user = current_user;"
-            f"INSERT INTO {db_schema}.selector_sector (sector_id, cur_user) VALUES ({sector}, current_user);"
-
-            f"DELETE FROM {db_schema}.selector_state WHERE cur_user = current_user;"
-            f"INSERT INTO {db_schema}.selector_state (state_id, cur_user) VALUES ({state}, current_user);"
-        )
-        conn.commit()
         print("base_config_file:  ", base_config_file)
         print("seed_yaml_file:  ", seed_yaml_file)
         os.system(f"mapproxy-seed -f {base_config_file} -s {seed_yaml_file} -c 4 --seed seed_prog > /logs/mapproxy_seed_all.log 2>&1")
@@ -85,6 +96,12 @@ def seed(config_path: str, generated_config_path: str, file_name: str, coverage:
         os.remove(last_seed_file)
     with open(last_seed_file, "w"):
         pass
+
+    # Close database connections
+    cursor.close()
+    conn.close()
+    remote_cursor.close()
+    remote_conn.close()
 
 
 def seed_update(config_path: str, generated_config_path: str, file_name: str, coverage: dict | None = None):
@@ -120,18 +137,27 @@ def seed_update(config_path: str, generated_config_path: str, file_name: str, co
 
     db_schema = config["data_db_schema"]
 
+    print("Replica DB: ", config["db_url"])
+    print("Main DB: ", config["db_url_remote"])
+
+    # Connect to main database for tilecluster data and feature boundary queries
     conn = psycopg2.connect(config["db_url"])
     cursor = conn.cursor()
+    print("Replica DB connected")
 
-    # Refresh materialized views
+    # Connect to remote database for materialized views and logging
+    remote_conn = psycopg2.connect(config["db_url_remote"])
+    remote_cursor = remote_conn.cursor()
+    print("Main DB connected")
+
+    # Refresh materialized views in remote database
     materialized_views = config["materialized_views"]
     print("Materialized views: ", materialized_views)
     for view in materialized_views:
         print("Refreshing materialized view: ", view)
-        cursor.execute(f"REFRESH MATERIALIZED VIEW {view}")
+        remote_cursor.execute(f"REFRESH MATERIALIZED VIEW {view}")
         print(f"{view} materialized view refreshed")
-    conn.commit()
-
+    remote_conn.commit()
 
     cursor.execute(f'SELECT tilecluster_id, expl_id, sector_id, state FROM {config["tiling_db_table"]}')
     tilecluster_data = cursor.fetchall()
@@ -159,15 +185,15 @@ def seed_update(config_path: str, generated_config_path: str, file_name: str, co
             with open(geojson_file_path, 'w') as f:
                 json.dump(geo_json, f, ensure_ascii=False)
 
-            # Log the start of the re-tiling process
+            # Log the start of the re-tiling process in remote database
             start_time = datetime.datetime.now()
             process_id = f"seed_update_{seed_update_start_time}"
-            cursor.execute(
+            remote_cursor.execute(
                 f"INSERT INTO {config['log_table']} (process_id, tilecluster_id, project_id, start_time, geometry) "
                 f"VALUES (%s, %s, %s, %s, ST_GeomFromGeoJSON(%s))",
                 (process_id, tilecluster_id, file_name, start_time, json.dumps(geo_json))
             )
-            conn.commit()
+            remote_conn.commit()
 
             grid_name = f"{tilecluster_id}_grid"
             print(f"Seeding {tilecluster_id}...")
@@ -200,13 +226,13 @@ def seed_update(config_path: str, generated_config_path: str, file_name: str, co
             print("seed_yaml_file:  ", seed_yaml_file)
             os.system(f"mapproxy-seed -f {base_config_file} -s {seed_yaml_file} -c 4 --seed seed_prog > /logs/mapproxy_seed_update.log 2>&1")
 
-            # Log the end of the re-tiling process
+            # Log the end of the re-tiling process in remote database
             end_time = datetime.datetime.now()
-            cursor.execute(
+            remote_cursor.execute(
                 f"UPDATE {config['log_table']} SET end_time = %s WHERE tilecluster_id = %s AND start_time = %s",
                 (end_time, tilecluster_id, start_time)
             )
-            conn.commit()
+            remote_conn.commit()
 
             print("seeded ", tilecluster_id)
             # Delete and recreate the last_seed_file
@@ -218,3 +244,9 @@ def seed_update(config_path: str, generated_config_path: str, file_name: str, co
         # Delete the geojson file to refresh it in the next iteration
         if os.path.exists(geojson_file_path):
             os.remove(geojson_file_path)
+
+    # Close database connections
+    cursor.close()
+    conn.close()
+    remote_cursor.close()
+    remote_conn.close()
