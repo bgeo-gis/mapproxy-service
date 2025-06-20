@@ -21,7 +21,7 @@ import psycopg2
 
 from make_conf import make_config
 from make_conf_v2 import make_config_v2
-from seeding_v2 import seed, seed_update
+from seeding_v2 import seed, seed_update, seed_muni, seed_update_muni
 
 user_config_path = '/srv/qwc_service/mapproxy/config/'
 generated_config_path = os.path.join(user_config_path, 'config-out')
@@ -87,6 +87,38 @@ def seed_update_time():
         start_time = time.perf_counter()
 
         seed_update(user_config_path, generated_config_path, file_name)
+
+        return Response(f"Config {file_name} seeded. Time taken: {time.perf_counter() - start_time}", 200)
+    except Exception as e:
+        return Response(f"Error seeding config: {e}", 500)
+
+@app.route('/seeding/seed/muni/all')
+# @jwt_required()
+def seed_muni_all():
+    file_name = request.args.get("config")
+    if file_name is None:
+        return Response("Config not provided", 400)
+
+    try:
+        start_time = time.perf_counter()
+
+        seed_muni(user_config_path, generated_config_path, file_name)
+
+        return Response(f"Config {file_name} seeded. Time taken: {time.perf_counter() - start_time}", 200)
+    except Exception as e:
+        return Response(f"Error seeding config: {e}", 500)
+
+@app.route('/seeding/seed/muni/update')
+# @jwt_required()
+def seed_muni_update_time():
+    file_name = request.args.get("config")
+    if file_name is None:
+        return Response("Config not provided", 400)
+
+    try:
+        start_time = time.perf_counter()
+
+        seed_update_muni(user_config_path, generated_config_path, file_name)
 
         return Response(f"Config {file_name} seeded. Time taken: {time.perf_counter() - start_time}", 200)
     except Exception as e:
