@@ -11,6 +11,7 @@ from pathlib import Path
 import datetime
 import time
 import json
+from make_conf_v2 import make_config_v2
 
 def seed(config_path: str, generated_config_path: str, file_name: str, coverage: dict | None = None):
 
@@ -136,9 +137,6 @@ def seed_update(config_path: str, generated_config_path: str, file_name: str, co
     last_seed = datetime.datetime.fromtimestamp(os.path.getmtime(last_seed_file))
     print("Last seed time: ", last_seed)
 
-    # Generated seed config file
-    base_config_file = os.path.join(generated_config_path, f"{file_name}.yaml")
-
     # Base seed config file
     user_config_file = os.path.join(config_path, f"{file_name}.yaml")
     with open(user_config_file, "r") as f:
@@ -166,7 +164,20 @@ def seed_update(config_path: str, generated_config_path: str, file_name: str, co
         print("Refreshing materialized view: ", view)
         remote_cursor.execute(f"REFRESH MATERIALIZED VIEW {view}")
         print(f"{view} materialized view refreshed")
+
+    # Refresh tilecluster materialized view
+    remote_cursor.execute(f"REFRESH MATERIALIZED VIEW {config['tiling_db_table']}")
+    print(f"{config['tiling_db_table']} materialized view refreshed")
+
     remote_conn.commit()
+
+    # Generate new yaml config file
+    make_config_v2(config_path, generated_config_path, file_name)
+    print("Configuración regenerada correctamente (make_config_v2)")
+
+    # Get config file
+    base_config_file = os.path.join(generated_config_path, f"{file_name}.yaml")
+
 
     cursor.execute(f'SELECT tilecluster_id, expl_id, sector_id, state FROM {config["tiling_db_table"]}')
     tilecluster_data = cursor.fetchall()
