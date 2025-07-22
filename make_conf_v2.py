@@ -64,7 +64,7 @@ def make_config_v2(config_path: str, generated_config_path: str, file_name: str)
             },
             "coverage": {
                 "clip": True,
-                "srs": "EPSG:31982",
+                "srs": config["crs"],
                 "datasource": config["db_url"],
                 "where": f"SELECT ST_Buffer(geom, 0) FROM {config['tiling_db_table']} WHERE tilecluster_id = '{tilecluster_id}'",
             },
