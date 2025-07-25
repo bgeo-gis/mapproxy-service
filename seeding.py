@@ -4,244 +4,155 @@ The program is free software: you can redistribute it and/or modify it under the
 General Public License as published by the Free Software Foundation, either version 3 of the License,
 or (at your option) any later version.
 """
-
-import os
+from typing import Any, Callable
+import yaml
 import psycopg2
-import datetime
-import json
-import argparse
+import os
+from dataclasses import dataclass
 
-# Command line arguments
-parser = argparse.ArgumentParser(prog='Seeding Program')
-parser.add_argument("config_file")
-parser.add_argument(
-    '-m', '--mode',
-    choices=["full", "update", "exploitation", "basemap", "update_elements", "update_timestamp"],
-    required=True,
-)
-parser.add_argument(
-    '-f', '--feature',
-    help="JSON string for the 'feature' argument",
-    required=False,
-)
-args = parser.parse_args()
-mode = args.mode
-config_file_path = args.config_file
+@dataclass
+class MapZone:
+    table: str
+    tab: str
+    column: str
 
-if args.feature:
-    try:
-        # Parse the JSON feature argument from the command line
-        feature_data = json.loads(args.feature)
-    except json.JSONDecodeError:
-        print("Invalid JSON for the 'feature' argument.")
-        exit(1)
+MAP_ZONES: dict[str, MapZone] = {
+    "E": MapZone(
+        "selector_expl",
+        "tab_exploitation",
+        "expl_id"
+    ),
+    "S": MapZone(
+        "selector_sector",
+        "tab_sector",
+        "sector_id"
+    ),
+    "M": MapZone(
+        "selector_municipality",
+        "tab_municipality",
+        "muni_id"
+    ),
+    "T": MapZone(
+        "selector_state",
+        "tab_network_state",
+        "state"
+    ),
+}
 
-# Get configuration
-config = None
-with open(config_file_path) as config_file:
-    config = json.load(config_file)
-    # print(config)
+def seed(
+    config: dict,
+    local_conn: psycopg2.extensions.connection,
+    remote_conn: psycopg2.extensions.connection,
+    generated_config_path: str,
+    temp_folder: str,
+    file_name: str,
+    coverage: dict | Callable[[str, list[tuple[MapZone, str]], Any], dict | None] | None = None
+):
+    local_cursor = local_conn.cursor()
+    remote_cursor = remote_conn.cursor()
 
-last_seed_file_path = config["last_seed_file_path"]
-base_config_path = config["base_config_path"]
-db_schema = config["db_schema"]
-schema_tiled = config["schema_tiled"]
-update_tables = config["update_tables"]
-max_level = config["max_level"]
-seed_yaml_file_path = '/tmp/temp_seed.yaml'
-geojson_file_path='/tmp/geometry.geojson'
-geo_json = None
+    # Temp files (seed yaml and last seed time)
+    seed_yaml_file = os.path.join(temp_folder, f"{file_name}_seed.yaml")
 
-# Connect to the database
-db_url = config["db_url"]
-pg_service = db_url.split("=")[-1]
+    # Generated seed config file
+    base_config_file = os.path.join(generated_config_path, f"{file_name}.yaml")
 
-conn = psycopg2.connect(db_url)
-cursor = conn.cursor()
+    db_schema = config["data_db_schema"]
 
-# Check last seed time (only when updating)
-last_seed = None
-if mode == "update" or mode == "update_timestamp":
-    if not os.path.exists(last_seed_file_path):
-        print(f"Last seed file `{last_seed_file_path}` does not exist, please do a full seed before updating")
-        exit(1)
+    local_cursor.execute(f'SELECT tilecluster_id FROM {config["tileclusters_table"]}')
+    tilecluster_ids = local_cursor.fetchall()
 
-    last_seed = datetime.datetime.fromtimestamp(os.path.getmtime(last_seed_file_path))
+    for tilecluster_id, in tilecluster_ids:
+        mapzones: list[tuple[MapZone, str]] = []
+        for part in tilecluster_id.split("-"):
+            mapzone_name_id = part[0]
+            mapzone_id = part[1:]
 
-# Recreate the last seed file to indicate the time of the newest seed
-if os.path.exists(last_seed_file_path):
-    os.remove(last_seed_file_path)
+            if mapzone_name_id not in MAP_ZONES:
+                raise ValueError(f"Invalid mapzone name: {mapzone_name_id}")
 
-if os.path.exists(geojson_file_path):
-    os.remove(geojson_file_path)
+            mapzone = MAP_ZONES[mapzone_name_id]
+            mapzones.append((mapzone, mapzone_id))
 
-with open(last_seed_file_path, 'w'):
-    pass
-
-# Seed basemap (only when doing a full seed)
-if config.get("basemap") and mode == "full" or mode == "basemap":
-
-    # Generate the seeding config file
-    basemap_file_str = (
-         "seeds:\n"
-         "  seed_prog:\n"
-        f"    caches: [{config['basemap']['cache_name']}]\n"
-         "    refresh_before:\n"
-         "      minutes: 0\n"
-         "    levels:\n"
-        f"      to: {max_level}\n"
-    )
-    with open(seed_yaml_file_path, 'w') as seed_yaml_file:
-        seed_yaml_file.write(basemap_file_str)
-
-    # Activate all exploitations in selector
-    cursor.execute((
-        f'SELECT {db_schema}.gw_fct_setselectors($${{'
-         '    "client": {"device": 5, "lang": "es_ES", "cur_user": "mapproxy", "tiled": "True", "infoType": 1, "epsg": 25831}, '
-         '    "form":{}, '
-         '    "feature":{}, '
-         '    "data":{"filterFields":{}, "pageInfo":{}, "selectorType": "None", "tabName": "tab_exploitation", "addSchema": "NULL", "checkAll": "True"}'
-         '}$$);'
-    ))
-    conn.commit()
-
-    # Execute seed command with the generated config
-    os.system(f"mapproxy-seed -f {base_config_path} -s {seed_yaml_file_path} -c 4 --seed seed_prog")
-
-# Seed diferent exploitations separately
-if config.get("exploitations") and mode in {"exploitation", "update", "full", "update_elements", "update_timestamp"}:
-    for expl_config in config["exploitations"]:
-
-        # Generate temporal seed config file
-        expl_id = expl_config["expl_id"]
-        cache_name = expl_config["cache_name"]
-
-        expl_geom_query = f"SELECT ST_Buffer(the_geom, 300) FROM {schema_tiled}.{db_schema}_t_exploitation WHERE expl_id='{expl_id}'"
-
-        coverage_where_str = ""
-        if mode == "update":
-            cursor.execute((f'REFRESH MATERIALIZED VIEW {schema_tiled}.{db_schema}_t_node'))
-            conn.commit()
-            print("Node materialized view refreshed----------")
-            coverage_where_list = []
-            for table in update_tables:
-                print("TABLE: ", table)
-                coverage_where_list.append((
-                    f"SELECT ST_Buffer(the_geom, 1) "
-                    f"FROM {schema_tiled}.{table} "
-                    f"WHERE lastupdate > '{str(last_seed)}'::timestamp AND ST_Intersects(the_geom, ({expl_geom_query}))"
-                ))
-                print("LAST_SEED: ",(str(last_seed)))
-            coverage_where_str = " UNION ".join(coverage_where_list)
-
-        elif mode == "update_elements":
-            cursor.execute((f'SELECT refresh_materialized_views()'))
-            conn.commit()
-            print("Materialized views refreshed----------")
-            feature_json = {
-                "client": {"device": 4, "infoType": 1, "lang": "ES"},
-                "form": {},
-                "feature": feature_data,
-                "data": {"type": "feature"}
+        coverage_dict = {}
+        if coverage is None:
+            coverage_dict = {
+                "clip": True,
+                "srs": config["crs"],
+                "datasource": config["db_url"],
+                "where": f"SELECT ST_Buffer(geom, 0) FROM {config['tileclusters_table']} WHERE tilecluster_id = '{tilecluster_id}'"
             }
-            feature_argument = json.dumps(feature_json)
-            sql_query = f'SELECT {db_schema}.gw_fct_getfeatureboundary($${feature_argument}$$)'
-            print("SQL: ", sql_query)
-            cursor.execute(sql_query)
-            result = cursor.fetchone()
-            print("RESULT 0", result[0])
-            geo_json = result[0]
+        elif isinstance(coverage, dict):
+            coverage_dict = coverage
+        elif callable(coverage):
+            result = coverage(tilecluster_id, mapzones, remote_conn)
+            if result is None:
+                print(f"No coverage found for tilecluster {tilecluster_id}, skipping seeding")
+                continue
 
-            with open(geojson_file_path, 'w') as f:
-                json.dump(geo_json, f, ensure_ascii=False)
+            coverage_dict = result
+        else:
+            raise ValueError("Coverage must be a dict or a callable function that returns a dict")
 
-        elif mode == "update_timestamp":
-            cursor.execute((f'SELECT refresh_materialized_views()'))
-            conn.commit()
-            print("Materialized views refreshed----------")
-            tables = [table.split('_')[-1] for table in update_tables]
-            feature_json = {
-                "client": {"device": 4, "infoType": 1, "lang": "ES"},
-                "form": {},
-                "feature": {"update_tables": tables},
-                "data": {"type": "time", "lastSeed": f"{str(last_seed)}"}
+        for mapzone, mapzone_id in mapzones:
+            remote_cursor.execute(f"DELETE FROM {db_schema}.{mapzone.table} WHERE cur_user = current_user;")
+
+        for mapzone, mapzone_id in mapzones:
+            # IMPORTANT: Set `value` to `True`
+            remote_cursor.execute(
+                f'''SELECT {db_schema}.gw_fct_setselectors($${{
+                    "client":{{
+                        "device": 5, "lang": "es_ES", "tiled": "False", "infoType": 1, "epsg": 25831
+                    }}, 
+                    "form":{{}}, "feature":{{}}, "data":{{
+                        "filterFields":{{}}, "pageInfo":{{}}, "selectorType": "selector_basic", "tabName": "{mapzone.tab}", "addSchema": "NULL", "id": "{mapzone_id}", "isAlone": "False", "disableParent": "False", "value": "True"
+                    }}
+                }}$$);'''
+            )
+            result = remote_cursor.fetchone()
+            if (
+                result is None or
+                result[0] is None or
+                result[0]["status"] != "Accepted"
+            ):
+                raise ValueError(f"Error setting selector for {mapzone.tab} with id {mapzone_id}: {result}")
+
+        remote_conn.commit()
+
+        print(f"Seeding {tilecluster_id}...")
+        grid_name = f"{tilecluster_id}_grid"
+
+        # Refresh materialized views in remote database after selector updates
+        materialized_views = config["materialized_views"]
+        for view in materialized_views:
+            print("Refreshing materialized view: ", view)
+            remote_cursor.execute(f"REFRESH MATERIALIZED VIEW {view}")
+
+        remote_conn.commit()
+
+        output = {
+            "seeds": {
+                "seed_prog": {
+                    "caches": [f"{tilecluster_id}_cache"],
+                    "refresh_before": {
+                        "minutes": 0
+                    },
+                    "grids": [grid_name],
+                }
+            },
+            "coverages": {
+                "main_coverage": coverage_dict
             }
-            feature_argument = json.dumps(feature_json)
-            sql_query = f'SELECT {db_schema}.gw_fct_getfeatureboundary($${feature_argument}$$)'
-            print("SQL: ", sql_query)
-            cursor.execute(sql_query)
-            result = cursor.fetchone()
-            print("RESULT 0", result[0])
-            geo_json = result[0]
+        }
 
-            with open(geojson_file_path, 'w') as f:
-                json.dump(geo_json, f, ensure_ascii=False)
-        else:
-            coverage_where_str = expl_geom_query
 
-        if mode == "exploitation":
-             expl_file_str = (
-             'seeds:\n'
-             '  seed_prog:\n'
-            f'    caches: [{cache_name}]\n'
-             '    coverages: [seed_cov]\n'
-             '    refresh_before:\n'
-             '      minutes: 0\n'
-             '    levels:\n'
-            f'      to: {max_level}\n'
-             'coverages:\n'
-             '  seed_cov:\n'
-             '    srs: "EPSG:25831"\n'
-            f'    datasource: {db_url}\n'
-            f'    where: {coverage_where_str}\n'
-        )
-        else:
-            expl_file_str = (
-                 'seeds:\n'
-                 '  seed_prog:\n'
-                f'    caches: [{cache_name}]\n'
-                 '    coverages: [seed_cov]\n'
-                 '    refresh_before:\n'
-                 '      minutes: 0\n'
-                 '    levels:\n'
-                f'      to: {max_level}\n'
-                 'coverages:\n'
-                 '  seed_cov:\n'
-                 '    srs: "EPSG:25831"\n'
-                f'    datasource: /tmp/geometry.geojson\n'
-        )
+        # If callback return None, we skip the seeding so this is not harmfull
+        output["seeds"]["seed_prog"]["coverages"] = ["main_coverage"]
 
-        print(expl_file_str)
-        with open(seed_yaml_file_path, 'w') as seed_yaml_file:
-            seed_yaml_file.write(expl_file_str)
+        with open(seed_yaml_file, "w") as f:
+            yaml.dump(output, f)
 
-        # Select only the current exploitation in the selector
-        cursor.execute((
-            f'SELECT {db_schema}.gw_fct_setselectors($${{'
-             '    "client": {"device": 5, "lang": "es_ES", "cur_user": "mapproxy", "tiled": "True", "infoType": 1, "epsg": 25831}, '
-             '    "form":{}, '
-             '    "feature":{}, '
-             '    "data":{"filterFields":{}, "pageInfo":{}, "selectorType": "None", "tabName": "tab_exploitation", "addSchema": "NULL", "checkAll": "False"}'
-             '}$$);'
-        ))
-        cursor.execute((
-            f'SELECT {db_schema}.gw_fct_setselectors($${{'
-             '    "client":{"device": 5, "lang": "es_ES", "cur_user": "mapproxy", "tiled": "True", "infoType": 1, "epsg": 25831}, '
-             '    "form":{}, '
-             '    "feature":{}, '
-             '    "data":{'
-             '        "filterFields":{}, "pageInfo":{}, "selectorType": "selector_basic", "tabName": "tab_exploitation", "addSchema": "NULL", '
-            f'        "id": "{expl_id}", '
-             '        "isAlone": "False", "disableParent": "False", "value": "True"'
-             '    }'
-             '}$$);'
-        ))
-        conn.commit()
-
-        # Execute seed command with the generated config
-        os.system(f"mapproxy-seed -f {base_config_path} -s {seed_yaml_file_path} -c 4 --seed seed_prog")
-
-# Remove temporal seed config file
-# if os.path.exists(seed_yaml_file_path):
-#     os.remove(seed_yaml_file_path)
+        print("base_config_file:  ", base_config_file)
+        print("seed_yaml_file:  ", seed_yaml_file)
+        os.system(f"mapproxy-seed -f {base_config_file} -s {seed_yaml_file} -c {os.cpu_count()} --seed seed_prog > /logs/mapproxy_seed.log 2>&1")
 
