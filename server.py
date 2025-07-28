@@ -162,6 +162,30 @@ def set_selectors():
     except Exception as e:
         return Response(f"Error setting selectors: {e}", 500)
 
+@app.route('/seeding/generate_config')
+# @jwt_required()
+def generate_config():
+    global mapproxy_app
+
+    file_name = request.args.get("config")
+    if file_name is None:
+        return Response("Config not provided", 400)
+
+    try:
+        start_time = time.perf_counter()
+
+        config = get_user_config(file_name)
+        local_conn, remote_conn = create_db_connections(config)
+
+        refresh_tileclusters(config, remote_conn, must_be_equal=True)
+        make_config(config, local_conn, generated_config_path, file_name)
+
+        mapproxy_app = get_mapproxy_app()
+
+        return Response(f"Config {file_name} generated. Time taken: {time.perf_counter() - start_time}", 200)
+    except Exception as e:
+        return Response(f"Error generating config: {e}", 500)
+
 @app.route('/seeding/seed/all')
 # @jwt_required()
 def seed_all():
