@@ -32,10 +32,9 @@ def make_config(config: dict, local_conn, generated_config_path: str, file_name:
     output = {
         "services": {
             "demo": None,
-            "wmts": None,
-            # "wms": {
-            #     "srs": ["EPSG:25831"],
-            # },
+            "wmts": {
+                "restful_template": "/tiles/{Layer}/{TileMatrixSet}/{TileMatrix}/{TileCol}/{TileRow}.{Format}"
+            },
         },
         "layers": [],
         "caches": {},
@@ -79,13 +78,18 @@ def make_config(config: dict, local_conn, generated_config_path: str, file_name:
             }
         }
         output["grids"][grid_name] = {
+            "name": grid_name,
             "srs": config["grid"]["srs"],
             "origin": config["grid"]["origin"],
             "res": list(config["res"]), # Without the list it generats weird stuff
             "bbox": bbox,
         }
         output["caches"][f"{tilecluster_id}_cache"] = {
-            "disable_storage": False,
+            "cache": {
+                "type": "file",
+                "use_grid_names": True,
+            },
+            # "disable_storage": False,
             # "link_single_color_images": "hardlink",
             "sources": [f"{tilecluster_id}_source"],
             "grids": [grid_name],
