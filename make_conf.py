@@ -70,8 +70,8 @@ def make_config(config: dict, local_conn, generated_config_path: str, file_name:
             },
             "coverage": {
                 "srs": config["crs"],
-                "datasource": config["db_url"],
-                "where": f"SELECT ST_Buffer(geom, 0) FROM {config['tileclusters_table']} WHERE tilecluster_id = '{tilecluster_id}'",
+                "datasource": config["db_url_remote"],
+                "where": f"SELECT geom FROM {config['tileclusters_table']} WHERE tilecluster_id = '{tilecluster_id}'",
             },
             "wms_opts": {
                 "featureinfo": True,
