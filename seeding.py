@@ -17,6 +17,11 @@ class MapZone:
     column: str
 
 MAP_ZONES: dict[str, MapZone] = {
+    "N": MapZone(
+        "selector_network",
+        "tab_network",
+        "network_id"
+    ),
     "E": MapZone(
         "selector_expl",
         "tab_exploitation",
