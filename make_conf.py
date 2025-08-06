@@ -50,8 +50,15 @@ def make_config(config: dict, local_conn, generated_config_path: str, file_name:
     local_cursor.execute(f'SELECT tilecluster_id FROM {config["tileclusters_table"]}')
     tilecluster_data = local_cursor.fetchall()
 
+    additional_source = config["sources"].get("additional_source", None)
+    additional_schema = config.get("additional_schema", None)
+
+    if bool(additional_source) != bool(additional_schema):
+        raise ValueError("Both 'additional_sources' and 'additional_schema' must be provided or neither.")
+
     for tilecluster_id, in tilecluster_data:
         print(tilecluster_id)
+
         grid_name = f"{tilecluster_id}_grid"
         bbox = get_bbox_from_db(tilecluster_id, local_conn, config)
 
@@ -61,12 +68,26 @@ def make_config(config: dict, local_conn, generated_config_path: str, file_name:
         bbox[2] += 50_000
         bbox[3] += 50_000
 
+        source = config["sources"]["inventory_source"]
+        if additional_source:
+            is_additional_schema = False
+            for part in tilecluster_id.split("-"):
+                mapzone_name_id = part[0]
+                mapzone_id = part[1:]
+
+                if mapzone_name_id == "N" and int(mapzone_id) == 2:
+                    is_additional_schema = True
+                    break
+
+            if is_additional_schema:
+                source = additional_source
+
         output["sources"][f"{tilecluster_id}_source"] = {
             "type": "wms",
             "seed_only": True,
             "req": {
                 "transparent": True,
-                **config["sources"]["inventory_source"],
+                **source,
             },
             "coverage": {
                 "srs": config["crs"],

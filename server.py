@@ -13,6 +13,7 @@ from qwc_services_core.tenant_handler import TenantHandler
 
 from mapproxy.multiapp import make_wsgi_app
 
+import traceback
 import yaml
 import json
 import time
@@ -63,6 +64,8 @@ def _set_selectors(config: dict, remote_conn) -> None:
     for mapzone in MAP_ZONES.values():
         remote_cursor.execute(f"DELETE FROM {config['data_db_schema']}.{mapzone.table} WHERE cur_user = current_user;")
 
+    additional_schema = config.get("additional_schema", "NULL")
+
     for selector in config.get("selectors", []):
         key, value = next(iter(selector.items()))
         mapzone = MAP_ZONES.get(key)
@@ -76,7 +79,7 @@ def _set_selectors(config: dict, remote_conn) -> None:
                 "client":{"device": 5, "lang": "es_ES", "tiled": "False", "infoType": 1},
                 "form":{}, "feature":{},
                 "data":{
-                    "filterFields":{}, "pageInfo":{}, "selectorType": "selector_basic", "tabName": mapzone.tab, "addSchema": "NULL", "checkAll": "True"
+                    "filterFields":{}, "pageInfo":{}, "selectorType": "selector_basic", "tabName": mapzone.tab, "addSchema": additional_schema, "checkAll": "True"
                 }
             }
             query_str = f"SELECT {config['data_db_schema']}.gw_fct_setselectors($${json.dumps(query)}$$)"
@@ -91,7 +94,7 @@ def _set_selectors(config: dict, remote_conn) -> None:
                     "client":{"device": 5, "lang": "es_ES", "tiled": "False", "infoType": 1},
                     "form":{}, "feature":{},
                     "data":{
-                        "filterFields":{}, "pageInfo":{}, "selectorType": "selector_basic", "tabName": mapzone.tab, "addSchema": "NULL", "id": str(item), "isAlone": "False", "disableParent": "False", "value": "True"
+                        "filterFields":{}, "pageInfo":{}, "selectorType": "selector_basic", "tabName": mapzone.tab, "addSchema": additional_schema, "id": str(item), "isAlone": "False", "disableParent": "False", "value": "True"
                     }
                 }
                 query_str = f"SELECT {config['data_db_schema']}.gw_fct_setselectors($${json.dumps(query)}$$)"
@@ -132,6 +135,7 @@ def refresh_tileclusters(config: dict, remote_conn, must_be_equal: bool) -> None
 # @jwt_required()
 def refresh_tileclusters_():
     config = request.args.get("config")
+    must_be_equal = request.args.get("must_be_equal", "true").lower() == "true"
     if config is None:
         return Response("Config not provided", 400)
 
@@ -139,7 +143,7 @@ def refresh_tileclusters_():
         user_config = get_user_config(config)
         local_conn, remote_conn = create_db_connections(user_config)
 
-        refresh_tileclusters(user_config, remote_conn, must_be_equal=True)
+        refresh_tileclusters(user_config, remote_conn, must_be_equal=must_be_equal)
 
         return Response(f"Refreshed {config} tileclusters", 200)
     except Exception as e:
@@ -160,6 +164,7 @@ def set_selectors():
 
         return Response(f"Selectors set for {config}", 200)
     except Exception as e:
+        print(traceback.format_exc())
         return Response(f"Error setting selectors: {e}", 500)
 
 @app.route('/seeding/generate_config')
@@ -168,6 +173,7 @@ def generate_config():
     global mapproxy_app
 
     file_name = request.args.get("config")
+    must_be_equal = request.args.get("must_be_equal", "true").lower() == "true"
     if file_name is None:
         return Response("Config not provided", 400)
 
@@ -177,13 +183,14 @@ def generate_config():
         config = get_user_config(file_name)
         local_conn, remote_conn = create_db_connections(config)
 
-        refresh_tileclusters(config, remote_conn, must_be_equal=True)
+        refresh_tileclusters(config, remote_conn, must_be_equal=must_be_equal)
         make_config(config, local_conn, generated_config_path, file_name)
 
         mapproxy_app = get_mapproxy_app()
 
         return Response(f"Config {file_name} generated. Time taken: {time.perf_counter() - start_time}", 200)
     except Exception as e:
+        print(traceback.format_exc())
         return Response(f"Error generating config: {e}", 500)
 
 @app.route('/seeding/seed/all')
@@ -210,12 +217,13 @@ def seed_all():
 
         refresh_tileclusters(config, remote_conn, must_be_equal=False)
         make_config(config, local_conn, generated_config_path, file_name)
-        seed(config, local_conn, remote_conn, generated_config_path, temp_folder, file_name)
+        seed(config, remote_conn, generated_config_path, temp_folder, file_name)
 
         mapproxy_app = get_mapproxy_app()
 
         return Response(f"Config {file_name} seeded. Time taken: {time.perf_counter() - start_time}", 200)
     except Exception as e:
+        print(traceback.format_exc())
         return Response(f"Error seeding config: {e}", 500)
 
 
@@ -247,24 +255,40 @@ def seed_update_time():
         last_seed_time = result[0]
         print(f"Last seed time:", last_seed_time)
 
-        def make_coverage(tilecluster_id: str, mapzones: list[tuple[MapZone, str]], remote_conn) -> dict | None:
+        def make_coverage(tilecluster_id: str, mapzones: dict[str, tuple[MapZone, str]], update_type: str) -> dict | None:
             geojson_file_path = os.path.join(temp_folder, f"{file_name}_geom_{tilecluster_id}.geojson")
 
-            extra_str = " AND ".join(f"{mz.column}='{id}'" for mz, id in mapzones)
-            print("Extra string for SQL:", extra_str)
+            # Select the from where to get the updated geometry depending on the network_id
+            schema = config["data_db_schema"]
+            update_tables = config["update_tables"]
+            if mz_data := mapzones.get("N"):
+                _, id = mz_data
+                if id == "2":
+                    schema = config["additional_schema"]
+                    update_tables = config["additional_update_tables"]
+
+            extra = {
+                mz.column: id for key, (mz, id) in mapzones.items() if key != "N"
+            }
+            print("Extra for SQL:", extra)
 
             feature_json = {
-                "client": {"device": 4, "infoType": 1, "lang": "ES"},
+                "client": {"device": 4, "infoType": 1, "lang": "ES", "epsg": int(config["crs"].split(":")[-1]) },
                 "form": {},
-                "feature": {"update_tables": config["update_tables"]},
-                "data": {"type": "time", "lastSeed": f"{str(last_seed_time)}", "extra": extra_str}
+                "feature": {"update_tables": update_tables},
+                "data": {"type": update_type, "lastSeed": f"{str(last_seed_time)}", "extra": extra}
             }
-            remote_cursor.execute(f'SELECT {config["data_db_schema"]}.gw_fct_getfeatureboundary($${json.dumps(feature_json)}$$)')
+            query = f'SELECT {schema}.gw_fct_getfeatureboundary($${json.dumps(feature_json)}$$)'
+            print(query)
+            remote_cursor.execute(query)
             result = remote_cursor.fetchone()
             if result is None:
                 return None
-
+            print("Result of gw_fct_getfeatureboundary:", result)
             geojson = result[0]
+            if geojson is None:
+                raise ValueError("No geometry found for the given tilecluster_id")
+
             if geojson['coordinates']:
                 with open(geojson_file_path, 'w') as f:
                     json.dump(geojson, f, ensure_ascii=False)
@@ -287,18 +311,29 @@ def seed_update_time():
                 "datasource": geojson_file_path,
             }
 
-        refresh_tileclusters(config, remote_conn, must_be_equal=True)
+        make_coverage_update = lambda tilecluster_id, mapzones: make_coverage(tilecluster_id, mapzones, "time_updated")
+        make_coverage_deleted = lambda tilecluster_id, mapzones: make_coverage(tilecluster_id, mapzones, "time_deleted")
+
+        # We need to refresh the deleted features before updating the coverage
+        # Otherwise, the deleted feature will not be inside the coverage and will not be updated
         seed(
             config,
-            local_conn,
             remote_conn,
             generated_config_path,
             temp_folder,
             file_name,
-            make_coverage
+            make_coverage_deleted
+        )
+        refresh_tileclusters(config, remote_conn, must_be_equal=True)
+        seed(
+            config,
+            remote_conn,
+            generated_config_path,
+            temp_folder,
+            file_name,
+            make_coverage_update
         )
 
-        # 
         mapproxy_app = get_mapproxy_app()
 
         remote_cursor.execute(
@@ -310,6 +345,7 @@ def seed_update_time():
 
         return Response(f"Config {file_name} seeded. Time taken: {time.perf_counter() - start_time}", 200)
     except Exception as e:
+        print(traceback.format_exc())
         return Response(f"Error seeding config: {e}", 500)
 
 
