@@ -39,6 +39,8 @@ mapproxy_app = get_mapproxy_app()
 app = Flask(__name__)
 tenant_handler = TenantHandler(app.logger)
 
+touch_reload_path = '/srv/touch_reload'
+
 # jwt = auth_manager(app)
 
 def get_user_config(config_name: str) -> dict:
@@ -186,7 +188,9 @@ def generate_config():
         refresh_tileclusters(config, remote_conn, must_be_equal=must_be_equal)
         make_config(config, local_conn, generated_config_path, file_name)
 
-        mapproxy_app = get_mapproxy_app()
+        # Touch reload file to trigger MapProxy reload
+        Path(touch_reload_path).touch()
+        # mapproxy_app = get_mapproxy_app()
 
         return Response(f"Config {file_name} generated. Time taken: {time.perf_counter() - start_time}", 200)
     except Exception as e:
@@ -219,7 +223,8 @@ def seed_all():
         make_config(config, local_conn, generated_config_path, file_name)
         seed(config, remote_conn, generated_config_path, temp_folder, file_name)
 
-        mapproxy_app = get_mapproxy_app()
+        Path(touch_reload_path).touch()
+        # mapproxy_app = get_mapproxy_app()
 
         return Response(f"Config {file_name} seeded. Time taken: {time.perf_counter() - start_time}", 200)
     except Exception as e:
@@ -334,7 +339,8 @@ def seed_update_time():
             make_coverage_update
         )
 
-        mapproxy_app = get_mapproxy_app()
+        Path(touch_reload_path).touch()
+        # mapproxy_app = get_mapproxy_app()
 
         remote_cursor.execute(
             f"UPDATE {config['tiling_db_schema']}.last_seed_time "
