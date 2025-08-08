@@ -18,6 +18,7 @@ import yaml
 import json
 import time
 import os
+import shutil
 import psycopg2
 import datetime
 from pathlib import Path
@@ -30,6 +31,7 @@ generated_config_path = os.path.join(user_config_path, 'config-out')
 
 temp_folder = os.path.join(user_config_path, "temp")
 Path(temp_folder).mkdir(parents=True, exist_ok=True)
+Path(generated_config_path).mkdir(parents=True, exist_ok=True)
 
 def get_mapproxy_app():
     return make_wsgi_app(generated_config_path, allow_listing=True, debug=False)
@@ -50,6 +52,9 @@ def get_user_config(config_name: str) -> dict:
 
     with open(user_config_file, "r") as f:
         return yaml.safe_load(f)
+
+def get_geom_folder(config_name: str) -> str:
+    return os.path.join(generated_config_path, f"{config_name}_geom")
 
 def create_db_connections(config: dict) -> tuple:
     try:
@@ -108,7 +113,7 @@ def _set_selectors(config: dict, remote_conn) -> None:
     remote_conn.commit()
 
 # Refresh the tileclusters materialized view, and check if it has been updated (aka, diferent rows)
-def refresh_tileclusters(config: dict, remote_conn, must_be_equal: bool) -> None:
+def refresh_tileclusters(config: dict, geom_folder: str, remote_conn, must_be_equal: bool) -> None:
     remote_cursor = remote_conn.cursor()
 
     # Get the current tileclusters
@@ -126,11 +131,24 @@ def refresh_tileclusters(config: dict, remote_conn, must_be_equal: bool) -> None
     remote_cursor.execute(f"REFRESH MATERIALIZED VIEW {config['tileclusters_table']}")
     remote_conn.commit()
 
-    remote_cursor.execute(f"SELECT tilecluster_id FROM {config['tileclusters_table']}")
+    remote_cursor.execute(f"SELECT tilecluster_id, ST_ASTEXT(geom) FROM {config['tileclusters_table']}")
     new_tileclusters = remote_cursor.fetchall()
 
-    if must_be_equal and set(current_tileclusters) != set(new_tileclusters):
+    if (
+        must_be_equal
+        and set(x[0] for x in current_tileclusters) != set(x[0] for x in new_tileclusters)
+    ):
         raise ValueError("PANIC: Tileclusters have changed after refresh, please check the database")
+
+    print(f"Creating geometry folder: {geom_folder}")
+    if os.path.exists(geom_folder):
+        shutil.rmtree(geom_folder)
+    Path(geom_folder).mkdir(parents=True, exist_ok=True)
+    for tilecluster_id, geom in new_tileclusters:
+
+        file_path = os.path.join(geom_folder, f"{tilecluster_id}.wkt")
+        with open(file_path, 'w') as f:
+            f.write(geom)
 
 
 @app.route('/seeding/refresh_tileclusters')
@@ -145,7 +163,8 @@ def refresh_tileclusters_():
         user_config = get_user_config(config)
         local_conn, remote_conn = create_db_connections(user_config)
 
-        refresh_tileclusters(user_config, remote_conn, must_be_equal=must_be_equal)
+        geom_folder = get_geom_folder(config)
+        refresh_tileclusters(user_config, geom_folder, remote_conn, must_be_equal=must_be_equal)
 
         return Response(f"Refreshed {config} tileclusters", 200)
     except Exception as e:
@@ -185,8 +204,9 @@ def generate_config():
         config = get_user_config(file_name)
         local_conn, remote_conn = create_db_connections(config)
 
-        refresh_tileclusters(config, remote_conn, must_be_equal=must_be_equal)
-        make_config(config, local_conn, generated_config_path, file_name)
+        geom_folder = get_geom_folder(file_name)
+        refresh_tileclusters(config, geom_folder, remote_conn, must_be_equal=must_be_equal)
+        make_config(config, local_conn, generated_config_path, geom_folder, file_name)
 
         # Touch reload file to trigger MapProxy reload
         Path(touch_reload_path).touch()
@@ -219,8 +239,9 @@ def seed_all():
                               (file_name, datetime.datetime.now(), datetime.datetime.now()))
         remote_conn.commit()
 
-        refresh_tileclusters(config, remote_conn, must_be_equal=False)
-        make_config(config, local_conn, generated_config_path, file_name)
+        geom_folder = get_geom_folder(file_name)
+        refresh_tileclusters(config, geom_folder, remote_conn, must_be_equal=False)
+        make_config(config, local_conn, generated_config_path, geom_folder, file_name)
         seed(config, remote_conn, generated_config_path, temp_folder, file_name)
 
         Path(touch_reload_path).touch()
@@ -319,6 +340,8 @@ def seed_update_time():
         make_coverage_update = lambda tilecluster_id, mapzones: make_coverage(tilecluster_id, mapzones, "time_updated")
         make_coverage_deleted = lambda tilecluster_id, mapzones: make_coverage(tilecluster_id, mapzones, "time_deleted")
 
+        geom_folder = get_geom_folder(file_name)
+
         # We need to refresh the deleted features before updating the coverage
         # Otherwise, the deleted feature will not be inside the coverage and will not be updated
         seed(
@@ -329,7 +352,7 @@ def seed_update_time():
             file_name,
             make_coverage_deleted
         )
-        refresh_tileclusters(config, remote_conn, must_be_equal=True)
+        refresh_tileclusters(config, geom_folder, remote_conn, must_be_equal=True)
         seed(
             config,
             remote_conn,

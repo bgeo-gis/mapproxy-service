@@ -25,7 +25,7 @@ def get_bbox_from_db(tilecluster_id, local_conn, config):
     return bbox
 
 
-def make_config(config: dict, local_conn, generated_config_path: str, file_name: str):
+def make_config(config: dict, local_conn, generated_config_path: str, geom_path: str, file_name: str):
     local_cursor = local_conn.cursor()
     generated_config_file = os.path.join(generated_config_path, f"{file_name}.yaml")
 
@@ -91,9 +91,13 @@ def make_config(config: dict, local_conn, generated_config_path: str, file_name:
             },
             "coverage": {
                 "srs": config["crs"],
-                "datasource": config["db_url_remote"],
-                "where": f"SELECT geom FROM {config['tileclusters_table']} WHERE tilecluster_id = '{tilecluster_id}'",
+                "datasource": os.path.join(geom_path, f'{tilecluster_id}.wkt'),
             },
+            # "coverage": {
+            #     "srs": config["crs"],
+            #     "datasource": config["db_url_remote"],
+            #     "where": f"SELECT geom FROM {config['tileclusters_table']} WHERE tilecluster_id = '{tilecluster_id}'",
+            # },
             "wms_opts": {
                 "featureinfo": True,
             }
