@@ -81,6 +81,21 @@ def seed(
     remote_cursor.execute(f'SELECT tilecluster_id FROM {config["tileclusters_table"]}')
     tilecluster_ids = remote_cursor.fetchall()
 
+    # Modify the base_config to extent the coverage
+    with open(base_config_file, "r") as f:
+        base_config = yaml.safe_load(f)
+
+    for tilecluster_id, in tilecluster_ids:
+        bbox = base_config["grids"][f"{tilecluster_id}_grid"]["bbox"]
+        base_config["sources"][f"{tilecluster_id}_source"]["coverage"] = {
+            "bbox": list(bbox),
+            "srs": config["crs"]
+        }
+
+    temp_config_file = os.path.join(temp_folder, f"{file_name}_temp.yaml")
+    with open(temp_config_file, "w") as f:
+        yaml.dump(base_config, f)
+
     for tilecluster_id, in tilecluster_ids:
         mapzones: dict[str, tuple[MapZone, str]] = parse_tilecluster(tilecluster_id)
 
@@ -169,7 +184,7 @@ def seed(
         with open(seed_yaml_file, "w") as f:
             yaml.dump(output, f)
 
-        print("base_config_file:  ", base_config_file)
+        print("base_config_file:  ", temp_config_file)
         print("seed_yaml_file:  ", seed_yaml_file)
         os.system(f"mapproxy-seed -f {base_config_file} -s {seed_yaml_file} -c {os.cpu_count()} --seed seed_prog > /logs/mapproxy_seed.log 2>&1")
 

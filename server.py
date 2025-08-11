@@ -250,7 +250,6 @@ def seed_all():
         seed(config, remote_conn, generated_config_path, temp_folder, file_name, make_coverage)
 
         Path(touch_reload_path).touch()
-        # mapproxy_app = get_mapproxy_app()
 
         return Response(f"Config {file_name} seeded. Time taken: {time.perf_counter() - start_time}", 200)
     except Exception as e:
@@ -286,7 +285,7 @@ def seed_update_time():
         last_seed_time = result[0]
         print(f"Last seed time:", last_seed_time)
 
-        def make_coverage(tilecluster_id: str, mapzones: dict[str, tuple[MapZone, str]], update_type: str) -> dict | None:
+        def make_coverage(tilecluster_id: str, mapzones: dict[str, tuple[MapZone, str]]) -> dict | None:
             geojson_file_path = os.path.join(temp_folder, f"{file_name}_geom_{tilecluster_id}.geojson")
 
             # Select the from where to get the updated geometry depending on the network_id
@@ -307,7 +306,7 @@ def seed_update_time():
                 "client": {"device": 4, "infoType": 1, "lang": "ES", "epsg": int(config["crs"].split(":")[-1]) },
                 "form": {},
                 "feature": {"update_tables": update_tables},
-                "data": {"type": update_type, "lastSeed": f"{str(last_seed_time)}", "extra": extra}
+                "data": {"type": "time", "lastSeed": f"{str(last_seed_time)}", "extra": extra}
             }
             query = f'SELECT {schema}.gw_fct_getfeatureboundary($${json.dumps(feature_json)}$$)'
             print(query)
@@ -342,21 +341,8 @@ def seed_update_time():
                 "datasource": geojson_file_path,
             }
 
-        make_coverage_update = lambda tilecluster_id, mapzones: make_coverage(tilecluster_id, mapzones, "time_updated")
-        make_coverage_deleted = lambda tilecluster_id, mapzones: make_coverage(tilecluster_id, mapzones, "time_deleted")
-
         geom_folder = get_geom_folder(file_name)
 
-        # We need to refresh the deleted features before updating the coverage
-        # Otherwise, the deleted feature will not be inside the coverage and will not be updated
-        seed(
-            config,
-            remote_conn,
-            generated_config_path,
-            temp_folder,
-            file_name,
-            make_coverage_deleted
-        )
         refresh_tileclusters(config, geom_folder, remote_conn, must_be_equal=True)
         seed(
             config,
@@ -364,11 +350,11 @@ def seed_update_time():
             generated_config_path,
             temp_folder,
             file_name,
-            make_coverage_update
+            make_coverage
+            # make_coverage_update
         )
 
         Path(touch_reload_path).touch()
-        # mapproxy_app = get_mapproxy_app()
 
         remote_cursor.execute(
             f"UPDATE {config['tiling_db_schema']}.last_seed_time "
