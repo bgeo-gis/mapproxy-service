@@ -65,7 +65,7 @@ def seed(
     generated_config_path: str,
     temp_folder: str,
     file_name: str,
-    coverage: dict | Callable[[str, dict[str, tuple[MapZone, str]]], dict | None] | None = None
+    coverage: dict | Callable[[str, dict[str, tuple[MapZone, str]]], dict | None]
 ):
     remote_cursor = remote_conn.cursor()
 
@@ -85,14 +85,7 @@ def seed(
         mapzones: dict[str, tuple[MapZone, str]] = parse_tilecluster(tilecluster_id)
 
         coverage_dict = {}
-        if coverage is None:
-            coverage_dict = {
-                "clip": False,
-                "srs": config["crs"],
-                "datasource": config["db_url"],
-                "where": f"SELECT ST_Buffer(geom, 0) FROM {config['tileclusters_table']} WHERE tilecluster_id = '{tilecluster_id}'"
-            }
-        elif isinstance(coverage, dict):
+        if isinstance(coverage, dict):
             coverage_dict = coverage
         elif callable(coverage):
             result = coverage(tilecluster_id, mapzones)

@@ -141,8 +141,6 @@ def refresh_tileclusters(config: dict, geom_folder: str, remote_conn, must_be_eq
         raise ValueError("PANIC: Tileclusters have changed after refresh, please check the database")
 
     print(f"Creating geometry folder: {geom_folder}")
-    if os.path.exists(geom_folder):
-        shutil.rmtree(geom_folder)
     Path(geom_folder).mkdir(parents=True, exist_ok=True)
     for tilecluster_id, geom in new_tileclusters:
 
@@ -240,9 +238,16 @@ def seed_all():
         remote_conn.commit()
 
         geom_folder = get_geom_folder(file_name)
+
+        def make_coverage(tilecluster_id: str, mapzones: dict[str, tuple[MapZone, str]]) -> dict | None:
+            return {
+                "srs": config["crs"],
+                "datasource": os.path.join(geom_folder, f'{tilecluster_id}.wkt'),
+            }
+
         refresh_tileclusters(config, geom_folder, remote_conn, must_be_equal=False)
         make_config(config, local_conn, generated_config_path, geom_folder, file_name)
-        seed(config, remote_conn, generated_config_path, temp_folder, file_name)
+        seed(config, remote_conn, generated_config_path, temp_folder, file_name, make_coverage)
 
         Path(touch_reload_path).touch()
         # mapproxy_app = get_mapproxy_app()
