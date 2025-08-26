@@ -204,7 +204,7 @@ def generate_config():
 
         geom_folder = get_geom_folder(file_name)
         refresh_tileclusters(config, geom_folder, remote_conn, must_be_equal=must_be_equal)
-        make_config(config, local_conn, generated_config_path, geom_folder, file_name)
+        make_config(config, remote_conn, generated_config_path, geom_folder, file_name)
 
         # Touch reload file to trigger MapProxy reload
         Path(touch_reload_path).touch()
@@ -246,7 +246,7 @@ def seed_all():
             }
 
         refresh_tileclusters(config, geom_folder, remote_conn, must_be_equal=False)
-        make_config(config, local_conn, generated_config_path, geom_folder, file_name)
+        make_config(config, remote_conn, generated_config_path, geom_folder, file_name)
         seed(config, remote_conn, generated_config_path, temp_folder, file_name, make_coverage)
 
         Path(touch_reload_path).touch()
@@ -343,7 +343,8 @@ def seed_update_time():
 
         geom_folder = get_geom_folder(file_name)
 
-        refresh_tileclusters(config, geom_folder, remote_conn, must_be_equal=True)
+        refresh_tileclusters(config, geom_folder, remote_conn, must_be_equal=False)
+        make_config(config, remote_conn, generated_config_path, geom_folder, file_name)
         seed(
             config,
             remote_conn,
@@ -351,7 +352,6 @@ def seed_update_time():
             temp_folder,
             file_name,
             make_coverage
-            # make_coverage_update
         )
 
         Path(touch_reload_path).touch()

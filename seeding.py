@@ -81,12 +81,14 @@ def seed(
     remote_cursor.execute(f'SELECT tilecluster_id FROM {config["tileclusters_table"]}')
     tilecluster_ids = remote_cursor.fetchall()
 
+    grid_name = "main_grid"
+
     # Modify the base_config to extent the coverage
     with open(base_config_file, "r") as f:
         base_config = yaml.safe_load(f)
 
     for tilecluster_id, in tilecluster_ids:
-        bbox = base_config["grids"][f"{tilecluster_id}_grid"]["bbox"]
+        bbox = base_config["grids"][grid_name]["bbox"]
         base_config["sources"][f"{tilecluster_id}_source"]["coverage"] = {
             "bbox": list(bbox),
             "srs": config["crs"]
@@ -153,7 +155,7 @@ def seed(
         remote_conn.commit()
 
         print(f"Seeding {tilecluster_id}...")
-        grid_name = f"{tilecluster_id}_grid"
+        # grid_name = f"{tilecluster_id}_grid"
 
         # Refresh materialized views in remote database after selector updates
         materialized_views = config["materialized_views"]
@@ -186,5 +188,5 @@ def seed(
 
         print("base_config_file:  ", temp_config_file)
         print("seed_yaml_file:  ", seed_yaml_file)
-        os.system(f"mapproxy-seed -f {base_config_file} -s {seed_yaml_file} -c {os.cpu_count()} --seed seed_prog > /logs/mapproxy_seed.log 2>&1")
+        os.system(f"mapproxy-seed -f {temp_config_file} -s {seed_yaml_file} -c {os.cpu_count() * 2} --seed seed_prog > /logs/mapproxy_seed_{tilecluster_id}.log 2>&1")
 

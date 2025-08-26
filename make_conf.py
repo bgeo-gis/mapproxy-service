@@ -9,25 +9,12 @@ import yaml
 import os
 from pathlib import Path
 
-def parse_bbox(bbox_str):
-    bbox_str = bbox_str.replace('BOX(', '').replace(')', '')
-    min_coords, max_coords = bbox_str.split(',')
-    min_x, min_y = map(float, min_coords.split())
-    max_x, max_y = map(float, max_coords.split())
-    return [min_x, min_y, max_x, max_y]
 
-def get_bbox_from_db(tilecluster_id, local_conn, config):
-    cur = local_conn.cursor()
-    query = f"SELECT ST_Extent(geom) FROM {config['tileclusters_table']} WHERE tilecluster_id = %s"
-    cur.execute(query, (tilecluster_id,))
-    bbox_str = cur.fetchone()[0]
-    bbox = parse_bbox(bbox_str)
-    return bbox
-
-
-def make_config(config: dict, local_conn, generated_config_path: str, geom_path: str, file_name: str):
-    local_cursor = local_conn.cursor()
+def make_config(config: dict, remote_conn, generated_config_path: str, geom_path: str, file_name: str):
+    remote_cursor = remote_conn.cursor()
     generated_config_file = os.path.join(generated_config_path, f"{file_name}.yaml")
+
+    grid_name = "main_grid"
 
     output = {
         "services": {
@@ -39,7 +26,15 @@ def make_config(config: dict, local_conn, generated_config_path: str, geom_path:
         "layers": [],
         "caches": {},
         "sources": {},
-        "grids": {},
+        "grids": {
+            grid_name: {
+                "name": grid_name,
+                "srs": config["grid"]["srs"],
+                "origin": config["grid"]["origin"],
+                "res": list(config["res"]), # Without the list it generats weird stuff
+                "bbox": config["grid"]["bbox"],
+            }
+        },
         "globals": {
             "cache": {
                 "base_dir": f'/srv/qwc_service/mapproxy/tiles/{file_name}'
@@ -47,8 +42,8 @@ def make_config(config: dict, local_conn, generated_config_path: str, geom_path:
         }
     }
 
-    local_cursor.execute(f'SELECT tilecluster_id FROM {config["tileclusters_table"]}')
-    tilecluster_data = local_cursor.fetchall()
+    remote_cursor.execute(f'SELECT tilecluster_id FROM {config["tileclusters_table"]}')
+    tilecluster_data = remote_cursor.fetchall()
 
     additional_source = config["sources"].get("additional_source", None)
     additional_schema = config.get("additional_schema", None)
@@ -58,15 +53,6 @@ def make_config(config: dict, local_conn, generated_config_path: str, geom_path:
 
     for tilecluster_id, in tilecluster_data:
         print(tilecluster_id)
-
-        grid_name = f"{tilecluster_id}_grid"
-        bbox = get_bbox_from_db(tilecluster_id, local_conn, config)
-
-        # Give extra space to ensure new elements fit in the cache file-structure
-        bbox[0] -= 50_000
-        bbox[1] -= 50_000
-        bbox[2] += 50_000
-        bbox[3] += 50_000
 
         source = config["sources"]["inventory_source"]
         if additional_source:
@@ -93,29 +79,16 @@ def make_config(config: dict, local_conn, generated_config_path: str, geom_path:
                 "srs": config["crs"],
                 "datasource": os.path.join(geom_path, f'{tilecluster_id}.wkt'),
             },
-            # "coverage": {
-            #     "srs": config["crs"],
-            #     "datasource": config["db_url_remote"],
-            #     "where": f"SELECT geom FROM {config['tileclusters_table']} WHERE tilecluster_id = '{tilecluster_id}'",
-            # },
             "wms_opts": {
                 "featureinfo": True,
             }
-        }
-        output["grids"][grid_name] = {
-            "name": grid_name,
-            "srs": config["grid"]["srs"],
-            "origin": config["grid"]["origin"],
-            "res": list(config["res"]), # Without the list it generats weird stuff
-            "bbox": bbox,
         }
         output["caches"][f"{tilecluster_id}_cache"] = {
             "cache": {
                 "type": "file",
                 "use_grid_names": True,
             },
-            # "disable_storage": False,
-            # "link_single_color_images": "hardlink",
+            "disable_storage": False,
             "sources": [f"{tilecluster_id}_source"],
             "grids": [grid_name],
         }
