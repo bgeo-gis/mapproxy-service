@@ -113,7 +113,7 @@ def _set_selectors(config: dict, remote_conn) -> None:
     remote_conn.commit()
 
 # Refresh the tileclusters materialized view, and check if it has been updated (aka, diferent rows)
-def refresh_tileclusters(config: dict, geom_folder: str, remote_conn, must_be_equal: bool) -> None:
+def refresh_tileclusters(config: dict, geom_folder: str, remote_conn) -> None:
     remote_cursor = remote_conn.cursor()
 
     # Get the current tileclusters
@@ -134,12 +134,6 @@ def refresh_tileclusters(config: dict, geom_folder: str, remote_conn, must_be_eq
     remote_cursor.execute(f"SELECT tilecluster_id, ST_ASTEXT(geom) FROM {config['tileclusters_table']}")
     new_tileclusters = remote_cursor.fetchall()
 
-    if (
-        must_be_equal
-        and set(x[0] for x in current_tileclusters) != set(x[0] for x in new_tileclusters)
-    ):
-        raise ValueError("PANIC: Tileclusters have changed after refresh, please check the database")
-
     print(f"Creating geometry folder: {geom_folder}")
     Path(geom_folder).mkdir(parents=True, exist_ok=True)
     for tilecluster_id, geom in new_tileclusters:
@@ -153,7 +147,6 @@ def refresh_tileclusters(config: dict, geom_folder: str, remote_conn, must_be_eq
 # @jwt_required()
 def refresh_tileclusters_():
     config = request.args.get("config")
-    must_be_equal = request.args.get("must_be_equal", "true").lower() == "true"
     if config is None:
         return Response("Config not provided", 400)
 
@@ -162,7 +155,7 @@ def refresh_tileclusters_():
         local_conn, remote_conn = create_db_connections(user_config)
 
         geom_folder = get_geom_folder(config)
-        refresh_tileclusters(user_config, geom_folder, remote_conn, must_be_equal=must_be_equal)
+        refresh_tileclusters(user_config, geom_folder, remote_conn)
 
         return Response(f"Refreshed {config} tileclusters", 200)
     except Exception as e:
@@ -192,7 +185,6 @@ def generate_config():
     global mapproxy_app
 
     file_name = request.args.get("config")
-    must_be_equal = request.args.get("must_be_equal", "true").lower() == "true"
     if file_name is None:
         return Response("Config not provided", 400)
 
@@ -203,7 +195,7 @@ def generate_config():
         local_conn, remote_conn = create_db_connections(config)
 
         geom_folder = get_geom_folder(file_name)
-        refresh_tileclusters(config, geom_folder, remote_conn, must_be_equal=must_be_equal)
+        refresh_tileclusters(config, geom_folder, remote_conn)
         make_config(config, remote_conn, generated_config_path, geom_folder, file_name)
 
         # Touch reload file to trigger MapProxy reload
@@ -245,7 +237,7 @@ def seed_all():
                 "datasource": os.path.join(geom_folder, f'{tilecluster_id}.wkt'),
             }
 
-        refresh_tileclusters(config, geom_folder, remote_conn, must_be_equal=False)
+        refresh_tileclusters(config, geom_folder, remote_conn)
         make_config(config, remote_conn, generated_config_path, geom_folder, file_name)
         seed(config, remote_conn, generated_config_path, temp_folder, file_name, make_coverage)
 
@@ -343,7 +335,7 @@ def seed_update_time():
 
         geom_folder = get_geom_folder(file_name)
 
-        refresh_tileclusters(config, geom_folder, remote_conn, must_be_equal=False)
+        refresh_tileclusters(config, geom_folder, remote_conn)
         make_config(config, remote_conn, generated_config_path, geom_folder, file_name)
         seed(
             config,
