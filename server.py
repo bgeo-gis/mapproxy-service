@@ -116,10 +116,6 @@ def _set_selectors(config: dict, remote_conn) -> None:
 def refresh_tileclusters(config: dict, geom_folder: str, remote_conn) -> None:
     remote_cursor = remote_conn.cursor()
 
-    # Get the current tileclusters
-    remote_cursor.execute(f'SELECT tilecluster_id FROM {config["tileclusters_table"]}')
-    current_tileclusters = remote_cursor.fetchall()
-
     _set_selectors(config, remote_conn)
 
     # Refresh parent materialized view
