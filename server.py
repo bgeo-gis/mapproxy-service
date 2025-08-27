@@ -64,29 +64,43 @@ def create_db_connections(config: dict) -> tuple:
     except Exception as e:
         raise ConnectionError(f"Could not connect to local database: {e}")
 
+MAP_ZONES_EXT = MAP_ZONES.copy()
+MAP_ZONES_EXT["A"] = MapZone(
+    table="",
+    tab="tab_exploitation_add",
+    column="",
+)
+
 def _set_selectors(config: dict, remote_conn) -> None:
     remote_cursor = remote_conn.cursor()
+
+    additional_schema = config.get("additional_schema")
 
     # Unselect all selectors
     for mapzone in MAP_ZONES.values():
         remote_cursor.execute(f"DELETE FROM {config['data_db_schema']}.{mapzone.table} WHERE cur_user = current_user;")
+        if additional_schema:
+            remote_cursor.execute(f"DELETE FROM {additional_schema}.{mapzone.table} WHERE cur_user = current_user;")
 
-    additional_schema = config.get("additional_schema", "NULL")
 
     for selector in config.get("selectors", []):
         key, value = next(iter(selector.items()))
-        mapzone = MAP_ZONES.get(key)
+        mapzone = MAP_ZONES_EXT.get(key)
         if mapzone is None:
             raise ValueError(f"Unknown mapzone_id: {key}")
 
-        print(f"Processing mapzone: {mapzone.tab}, column: {mapzone.column}, value: {value}")
+        print(f"Processing mapzone: {mapzone.tab}, value: {value}")
 
         if value == True:
             query = {
                 "client":{"device": 5, "lang": "es_ES", "tiled": "False", "infoType": 1},
                 "form":{}, "feature":{},
                 "data":{
-                    "filterFields":{}, "pageInfo":{}, "selectorType": "selector_basic", "tabName": mapzone.tab, "addSchema": additional_schema, "checkAll": "True"
+                    "filterFields":{}, "pageInfo":{},
+                    "selectorType": "selector_basic",
+                    "tabName": mapzone.tab,
+                    "addSchema": additional_schema if additional_schema else "NULL",
+                    "checkAll": "True"
                 }
             }
             query_str = f"SELECT {config['data_db_schema']}.gw_fct_setselectors($${json.dumps(query)}$$)"
@@ -94,7 +108,9 @@ def _set_selectors(config: dict, remote_conn) -> None:
             remote_cursor.execute(query_str)
 
             result = remote_cursor.fetchone()
-            print("Result of setselectors:", result)
+            if result and result[0]['status'] != 'Accepted':
+                print("Result of setselectors:", result)
+
         elif isinstance(value, list):
             for item in value:
                 query = {
@@ -108,7 +124,8 @@ def _set_selectors(config: dict, remote_conn) -> None:
                 print("Executing query:", query_str)
                 remote_cursor.execute(query_str)
                 result = remote_cursor.fetchone()
-                print("Result of setselectors:", result)
+                if result and result[0]['status'] != 'Accepted':
+                    print("Result of setselectors:", result)
 
     remote_conn.commit()
 

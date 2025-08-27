@@ -76,7 +76,7 @@ def seed(
     base_config_file = os.path.join(generated_config_path, f"{file_name}.yaml")
 
     db_schema = config["data_db_schema"]
-    additional_schema = config.get("additional_schema", "NULL")
+    additional_schema = config.get("additional_schema")
 
     remote_cursor.execute(f'SELECT tilecluster_id FROM {config["tileclusters_table"]}')
     tilecluster_ids = remote_cursor.fetchall()
@@ -114,8 +114,13 @@ def seed(
         else:
             raise ValueError("Coverage must be a dict or a callable function that returns a dict")
 
-        for mapzone, mapzone_id in mapzones.values():
-            remote_cursor.execute(f"DELETE FROM {db_schema}.{mapzone.table} WHERE cur_user = current_user;")
+        tilecluster_schema = db_schema
+        data = mapzones.get('N')
+        if data and int(data[1]) == 2:
+            tilecluster_schema = additional_schema
+
+        for mapzone in MAP_ZONES.values():
+            remote_cursor.execute(f"DELETE FROM {tilecluster_schema}.{mapzone.table} WHERE cur_user = current_user;")
 
         for mapzone, mapzone_id in mapzones.values():
             # IMPORTANT: Set `value` to `True`
@@ -134,7 +139,8 @@ def seed(
                     "pageInfo": {},
                     "selectorType": "selector_basic",
                     "tabName": mapzone.tab,
-                    "addSchema": additional_schema,
+                    "addSchema": "NULL",
+                    # "addSchema": additional_schema if additional_schema else "NULL",
                     "id": mapzone_id,
                     "isAlone": "False",
                     "disableParent": "False",
@@ -142,7 +148,7 @@ def seed(
                 }
             }
             remote_cursor.execute(
-                f'SELECT {db_schema}.gw_fct_setselectors($${json.dumps(input)}$$);'
+                f'SELECT {tilecluster_schema}.gw_fct_setselectors($${json.dumps(input)}$$);'
             )
             result = remote_cursor.fetchone()
             if (
