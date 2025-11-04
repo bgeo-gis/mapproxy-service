@@ -116,6 +116,10 @@ def _set_selectors(config: dict, remote_conn) -> None:
 def refresh_tileclusters(config: dict, geom_folder: str, remote_conn) -> None:
     remote_cursor = remote_conn.cursor()
 
+    # Get current tilecluster_id list before refreshing
+    remote_cursor.execute(f"SELECT tilecluster_id FROM {config['tileclusters_table']} ORDER BY tilecluster_id")
+    current_tilecluster_ids = set(row[0] for row in remote_cursor.fetchall())
+
     _set_selectors(config, remote_conn)
 
     # Refresh parent materialized view
@@ -126,6 +130,20 @@ def refresh_tileclusters(config: dict, geom_folder: str, remote_conn) -> None:
 
     remote_cursor.execute(f"REFRESH MATERIALIZED VIEW {config['tileclusters_table']}")
     remote_conn.commit()
+
+    # Get new tilecluster_id list after refreshing
+    remote_cursor.execute(f"SELECT tilecluster_id FROM {config['tileclusters_table']} ORDER BY tilecluster_id")
+    new_tilecluster_ids = set(row[0] for row in remote_cursor.fetchall())
+
+    # Compare with previous list
+    if current_tilecluster_ids != new_tilecluster_ids:
+        error_msg = (
+            f"Tileclusters have changed either in number or in content after refresh for schema '{config['data_db_schema']}'. "
+            f"Before: {len(current_tilecluster_ids)} tileclusters, After: {len(new_tilecluster_ids)} tileclusters. "
+            f"Stopping tiling/update process. Please keep this in mind before tiling/updating again."
+        )
+        print(error_msg)
+        raise ValueError(error_msg)
 
     remote_cursor.execute(f"SELECT tilecluster_id, ST_ASTEXT(geom) FROM {config['tileclusters_table']}")
     new_tileclusters = remote_cursor.fetchall()
